@@ -1,0 +1,16 @@
+.env
+token.json
+oauth_client.json
+service_account.json
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.coverage
+reports/
+.e2e/
+testing/reports/
+testing/.e2e/
+playwright-report/
+app.db
+erp.db
