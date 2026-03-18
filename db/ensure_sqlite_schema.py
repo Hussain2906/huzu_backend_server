@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.db.base import Base
 from app.db.bootstrap_admins import ensure_platform_admin_users
 from app.db.session import engine
+from app.services.party_service import ensure_party_links_for_legacy_data
 
 
 def _column_names(conn, table: str) -> set[str]:
@@ -30,10 +32,14 @@ def ensure_sqlite_schema() -> None:
         customer_cols = _column_names(conn, "customers")
         if "extra_json" not in customer_cols:
             conn.execute(text("ALTER TABLE customers ADD COLUMN extra_json TEXT"))
+        if "party_id" not in customer_cols:
+            conn.execute(text("ALTER TABLE customers ADD COLUMN party_id VARCHAR(36)"))
 
         supplier_cols = _column_names(conn, "suppliers")
         if "extra_json" not in supplier_cols:
             conn.execute(text("ALTER TABLE suppliers ADD COLUMN extra_json TEXT"))
+        if "party_id" not in supplier_cols:
+            conn.execute(text("ALTER TABLE suppliers ADD COLUMN party_id VARCHAR(36)"))
 
         invoice_cols = _column_names(conn, "invoices")
         if "extra_json" not in invoice_cols:
@@ -58,3 +64,10 @@ def ensure_sqlite_schema() -> None:
         if "line_order" not in line_cols:
             conn.execute(text("ALTER TABLE quotation_lines ADD COLUMN line_order INTEGER DEFAULT 0"))
             conn.execute(text("UPDATE quotation_lines SET line_order = 0 WHERE line_order IS NULL"))
+
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_customers_party_id ON customers(party_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_suppliers_party_id ON suppliers(party_id)"))
+
+    with Session(engine) as session:
+        ensure_party_links_for_legacy_data(session)
+        session.commit()

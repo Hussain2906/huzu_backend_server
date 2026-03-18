@@ -26,6 +26,7 @@ from app.db.models import (
     User,
 )
 from app.services.invoice_service import create_invoice
+from app.services.party_service import link_customer_to_party, link_supplier_to_party
 
 
 def _clean(value: Any) -> str:
@@ -421,6 +422,52 @@ def _template_definition(module: str) -> dict[str, Any]:
                 "purchase_rate": "80",
                 "taxable": "TRUE",
                 "tax_rate": "18",
+            },
+        },
+        "parties_old_report": {
+            "headers": [
+                "SR NO",
+                "NAME",
+                "PHONE",
+                "CATEGORY",
+                "CREDIT",
+                "TYPE",
+                "GST NO",
+                "BILLING TYPE",
+                "DOB",
+                "BUSINESS NAME",
+                "EMAIL",
+                "BILLING ADDRESS",
+                "BILLING STATES & U.T.",
+                "BILLING POSTAL CODE",
+                "DELIVERY ADDRESS",
+                "DELIVERY STATES & U.T.",
+                "DELIVERY POSTAL CODE",
+                "PAYMENT TERM",
+                "SEND ALERTS",
+                "FAVOURITE PARTY",
+            ],
+            "sample": {
+                "SR NO": "1",
+                "NAME": "Sample Customer",
+                "PHONE": "9000000000",
+                "CATEGORY": "DEBTORS",
+                "CREDIT": "₹ 24005.0",
+                "TYPE": "CUSTOMER",
+                "GST NO": "22AAAAA0000A1Z5",
+                "BILLING TYPE": "REGULAR",
+                "DOB": "1990-01-15",
+                "BUSINESS NAME": "Sample Traders",
+                "EMAIL": "party@example.com",
+                "BILLING ADDRESS": "Main Street",
+                "BILLING STATES & U.T.": "Maharashtra",
+                "BILLING POSTAL CODE": "411001",
+                "DELIVERY ADDRESS": "Warehouse Road",
+                "DELIVERY STATES & U.T.": "Maharashtra",
+                "DELIVERY POSTAL CODE": "411002",
+                "PAYMENT TERM": "30 DAYS",
+                "SEND ALERTS": "YES",
+                "FAVOURITE PARTY": "NO",
             },
         },
     }
@@ -1098,6 +1145,8 @@ def import_purchases(db: Session, user: User, rows: list[dict[str, str]], header
             )
             db.add(supplier)
             db.flush()
+        if not supplier.party_id:
+            link_supplier_to_party(db, supplier)
 
         line_payloads = []
         for row, row_num in data["lines"]:
@@ -1275,6 +1324,8 @@ def import_sales(db: Session, user: User, rows: list[dict[str, str]], headers: l
             )
             db.add(customer)
             db.flush()
+        if not customer.party_id:
+            link_customer_to_party(db, customer)
 
         line_payloads = []
         for row, row_num in data["lines"]:

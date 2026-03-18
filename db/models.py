@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     Numeric,
@@ -94,6 +95,11 @@ class QuotationLineType(str, enum.Enum):
 
 
 class QuotationPartyType(str, enum.Enum):
+    CUSTOMER = "CUSTOMER"
+    SUPPLIER = "SUPPLIER"
+
+
+class PartyRoleType(str, enum.Enum):
     CUSTOMER = "CUSTOMER"
     SUPPLIER = "SUPPLIER"
 
@@ -366,6 +372,7 @@ class Customer(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"))
+    party_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("parties.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(200))
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     gstin: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -382,6 +389,7 @@ class Supplier(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"))
+    party_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("parties.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(200))
     business_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -399,6 +407,67 @@ class Supplier(Base):
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class Party(Base):
+    __tablename__ = "parties"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"))
+    code: Mapped[str] = mapped_column(String(60))
+    name: Mapped[str] = mapped_column(String(200))
+    display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    alternate_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    gstin: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    business_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    dob: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    billing_type: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    payment_term: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    send_alerts: Mapped[bool] = mapped_column(Boolean, default=False)
+    favourite_party: Mapped[bool] = mapped_column(Boolean, default=False)
+    opening_balance: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    balance_nature: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    category_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    billing_address_line: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    billing_state: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    billing_postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    delivery_address_line: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    delivery_state: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    delivery_postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    source_row_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    import_batch_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("party_import_batches.id"), nullable=True)
+    raw_import_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "code", name="uq_parties_company_code"),
+        Index("ix_parties_company_name", "company_id", "name"),
+        Index("ix_parties_company_phone", "company_id", "phone"),
+        Index("ix_parties_company_gstin", "company_id", "gstin"),
+    )
+
+
+class PartyRole(Base):
+    __tablename__ = "party_roles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"))
+    party_id: Mapped[str] = mapped_column(String(36), ForeignKey("parties.id"))
+    role: Mapped[PartyRoleType] = mapped_column(Enum(PartyRoleType))
+    customer_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("customers.id"), nullable=True)
+    supplier_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("suppliers.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "party_id", "role", name="uq_party_roles_party_role"),
+        Index("ix_party_roles_company_role", "company_id", "role"),
+    )
 
 
 class Invoice(Base):
@@ -631,3 +700,57 @@ class ImportJob(Base):
     result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class PartyImportBatch(Base):
+    __tablename__ = "party_import_batches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"))
+    source: Mapped[str] = mapped_column(String(80), default="import_old_party_report")
+    file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="PREVIEW_READY")
+    duplicate_policy: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    total_rows: Mapped[int] = mapped_column(Integer, default=0)
+    create_count: Mapped[int] = mapped_column(Integer, default=0)
+    update_count: Mapped[int] = mapped_column(Integer, default=0)
+    duplicate_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, default=0)
+    warning_count: Mapped[int] = mapped_column(Integer, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, default=0)
+    fail_count: Mapped[int] = mapped_column(Integer, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
+    result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_party_import_batches_company_created", "company_id", "created_at"),
+    )
+
+
+class PartyImportRow(Base):
+    __tablename__ = "party_import_rows"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    batch_id: Mapped[str] = mapped_column(String(36), ForeignKey("party_import_batches.id"))
+    company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"))
+    row_number: Mapped[int] = mapped_column(Integer)
+    role: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    action: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(30), default="PREVIEW")
+    match_confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    matched_party_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("parties.id"), nullable=True)
+    applied_party_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("parties.id"), nullable=True)
+    parsed_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    raw_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    warnings_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    errors_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    __table_args__ = (
+        Index("ix_party_import_rows_batch_rownum", "batch_id", "row_number"),
+    )

@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_company_user
@@ -14,6 +14,12 @@ from app.services.import_service import (
     parse_stock_summary_report_content,
     parse_tabular_upload,
     parse_tabular_upload_content,
+)
+from app.services.party_import_service import (
+    commit_party_import,
+    get_party_import_batch_detail,
+    list_party_import_batches,
+    preview_party_import,
 )
 
 router = APIRouter(prefix="/v1/imports", tags=["imports"])
@@ -41,6 +47,67 @@ class ImportResult(BaseModel):
     imported: int
     errors: list[ImportError] | None = None
     summary: dict | None = None
+
+
+class PartyImportPreviewRow(BaseModel):
+    row_number: int
+    parsed_values: dict
+    detected_role: str | None = None
+    warnings: list[dict] = Field(default_factory=list)
+    errors: list[dict] = Field(default_factory=list)
+    action: str
+    matched_party_id: str | None = None
+    match_confidence: str | None = None
+    match_reason: str | None = None
+
+
+class PartyImportPreviewOut(BaseModel):
+    batch_id: str
+    file_name: str
+    file_hash: str
+    summary: dict
+    rows: list[PartyImportPreviewRow]
+
+
+class PartyImportCommitIn(BaseModel):
+    batch_id: str
+    duplicate_policy: str = "UPDATE_MATCHED"
+
+
+class PartyImportCommitOut(BaseModel):
+    batch_id: str
+    status: str
+    summary: dict
+
+
+class PartyImportHistoryRow(BaseModel):
+    batch_id: str
+    source: str
+    file_name: str | None = None
+    status: str
+    duplicate_policy: str | None = None
+    total_rows: int
+    create_count: int
+    update_count: int
+    duplicate_count: int
+    error_count: int
+    warning_count: int
+    success_count: int
+    fail_count: int
+    skipped_count: int
+    created_at: str | None = None
+    committed_at: str | None = None
+
+
+class PartyImportBatchDetailOut(BaseModel):
+    batch_id: str
+    status: str
+    file_name: str | None = None
+    duplicate_policy: str | None = None
+    created_at: str | None = None
+    committed_at: str | None = None
+    summary: dict
+    rows: list[dict]
 
 
 @router.post("", response_model=ImportOut)
@@ -77,7 +144,7 @@ def get_import_job(
 @router.get("/templates/{module}")
 def download_template(
     module: str,
-    format: str = "xlsx",
+    format: str = "csv",
     user: User = Depends(require_company_user),
 ):
     content, media_type, filename = build_template(module, output_format=format)
@@ -85,6 +152,72 @@ def download_template(
         content,
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/parties/preview", response_model=PartyImportPreviewOut)
+def preview_party_import_endpoint(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_company_user),
+) -> PartyImportPreviewOut:
+    content = file.file.read()
+    result = preview_party_import(
+        db,
+        user,
+        filename=file.filename or "party_import.xlsx",
+        content=content,
+    )
+    return PartyImportPreviewOut(**result)
+
+
+@router.post("/parties/commit", response_model=PartyImportCommitOut)
+def commit_party_import_endpoint(
+    payload: PartyImportCommitIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_company_user),
+) -> PartyImportCommitOut:
+    result = commit_party_import(
+        db,
+        user,
+        batch_id=payload.batch_id,
+        duplicate_policy=payload.duplicate_policy,
+    )
+    return PartyImportCommitOut(**result)
+
+
+@router.get("/parties/history", response_model=list[PartyImportHistoryRow])
+def party_import_history(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_company_user),
+) -> list[PartyImportHistoryRow]:
+    rows = list_party_import_batches(db, user, limit=limit)
+    return [
+        PartyImportHistoryRow(
+            **{
+                **row,
+                "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
+                "committed_at": row.get("committed_at").isoformat() if row.get("committed_at") else None,
+            }
+        )
+        for row in rows
+    ]
+
+
+@router.get("/parties/{batch_id}", response_model=PartyImportBatchDetailOut)
+def get_party_import_batch(
+    batch_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_company_user),
+) -> PartyImportBatchDetailOut:
+    row = get_party_import_batch_detail(db, user, batch_id)
+    return PartyImportBatchDetailOut(
+        **{
+            **row,
+            "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
+            "committed_at": row.get("committed_at").isoformat() if row.get("committed_at") else None,
+        }
     )
 
 
@@ -100,6 +233,10 @@ def import_module(
     db: Session = Depends(get_db),
     user: User = Depends(require_company_user),
 ) -> ImportResult:
+    filename = (file.filename or "").lower()
+    if not (filename.endswith(".csv") or filename.endswith(".xlsx") or filename.endswith(".xlsm")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only CSV and XLSX files are supported")
+
     content = file.file.read()
     options = {
         "create_missing_products": create_missing_products,

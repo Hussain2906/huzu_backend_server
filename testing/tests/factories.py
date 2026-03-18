@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import random
 
 from app.db.models import Company, User, UserStatus, Role, RoleScope, UserRole, ProductCategory, Product, Customer, Supplier
+from app.services.party_service import link_customer_to_party, link_supplier_to_party
 from app.security.passwords import hash_password
 
 
@@ -130,6 +131,8 @@ def create_product(
 def create_customer(db, company_id: str, name: str = "Customer") -> Customer:
     row = Customer(company_id=company_id, name=name, phone="9000000000")
     db.add(row)
+    db.flush()
+    link_customer_to_party(db, row)
     db.commit()
     return row
 
@@ -137,5 +140,7 @@ def create_customer(db, company_id: str, name: str = "Customer") -> Customer:
 def create_supplier(db, company_id: str, name: str = "Supplier") -> Supplier:
     row = Supplier(company_id=company_id, name=name, phone="9111111111")
     db.add(row)
+    db.flush()
+    link_supplier_to_party(db, row)
     db.commit()
     return row
