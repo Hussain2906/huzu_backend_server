@@ -19,6 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.config import settings
 from app.db.base import Base
 from app.db import gst_models  # ensure GST tables are registered
 
@@ -687,6 +688,41 @@ class DownloadJob(Base):
     result_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class MobileRelease(Base):
+    __tablename__ = "mobile_releases"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    platform: Mapped[str] = mapped_column(String(20), default="android")
+    environment: Mapped[str] = mapped_column(String(20), default=settings.app_env)
+    version_code: Mapped[int] = mapped_column(Integer)
+    version_name: Mapped[str] = mapped_column(String(40))
+    min_supported_version_code: Mapped[int] = mapped_column(Integer)
+    mandatory: Mapped[bool] = mapped_column(Boolean, default=False)
+    apk_url: Mapped[str] = mapped_column(String(1024))
+    sha256: Mapped[str] = mapped_column(String(64))
+    release_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "platform",
+            "environment",
+            "version_code",
+            name="uq_mobile_releases_platform_environment_version",
+        ),
+        Index(
+            "ix_mobile_releases_platform_environment_active",
+            "platform",
+            "environment",
+            "is_active",
+        ),
+        Index("ix_mobile_releases_published_at", "published_at"),
+    )
 
 
 class ImportJob(Base):
