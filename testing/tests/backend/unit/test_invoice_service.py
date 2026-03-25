@@ -258,3 +258,31 @@ def test_create_invoice_gst_positive_rate_overrides_false_taxable_flag(db_sessio
     assert float(invoice.cgst_amount or 0) == 18.0
     assert float(invoice.sgst_amount or 0) == 18.0
     assert float(invoice.grand_total) == 236.0
+
+
+@pytest.mark.unit
+def test_create_invoice_continues_when_auto_post_fails(db_session, seed_roles, monkeypatch):
+    company = create_company(db_session, name="Posting Fail Co")
+    user = create_user(db_session, username="owner_post_fail", password="Pass@1234", company_id=company.id, role_code="SUPER_ADMIN")
+
+    def _raise_auto_post(*args, **kwargs):
+        raise RuntimeError("voucher posting failed")
+
+    monkeypatch.setattr("app.services.invoice_service.auto_post_invoice", _raise_auto_post)
+
+    invoice = create_invoice(
+        db_session,
+        user,
+        InvoiceType.SALES,
+        {
+            "invoice_no": "S-POST-1",
+            "invoice_date": datetime.utcnow(),
+            "tax_mode": TaxMode.NON_GST,
+            "lines": [{"description": "Service", "qty": 1, "price": 100}],
+        },
+    )
+
+    assert invoice.id
+    assert invoice.voucher_id is None
+    assert float(invoice.paid_amount or 0) == 0.0
+    assert float(invoice.balance_due or 0) == float(invoice.grand_total)

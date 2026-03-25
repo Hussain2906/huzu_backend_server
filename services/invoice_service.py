@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
+import logging
 import re
 
 from fastapi import HTTPException, status
@@ -24,6 +25,8 @@ from app.db.models import (
     User,
 )
 from app.services.accounting.voucher_service import auto_post_invoice
+
+logger = logging.getLogger(__name__)
 
 
 def _round_money(value: float) -> float:
@@ -367,11 +370,8 @@ def create_invoice(
                 )
             )
 
-    db.commit()
-
-    # Auto-post to accounting and link voucher/balances
-    voucher = auto_post_invoice(db, invoice)
-    invoice.voucher_id = voucher.id
+    # Persist invoice and stock effects first so core sales/purchase flow is not blocked
+    # by accounting posting issues.
     payment_status_raw = payload.get("payment_status")
     payment_status = str(payment_status_raw or "").strip().upper()
     has_payment = payment_mode is not None
@@ -394,6 +394,16 @@ def create_invoice(
             invoice.balance_due = invoice.grand_total
     db.commit()
     db.refresh(invoice)
+
+    # Auto-post to accounting and link voucher in best-effort mode.
+    try:
+        voucher = auto_post_invoice(db, invoice)
+        invoice.voucher_id = voucher.id
+        db.commit()
+        db.refresh(invoice)
+    except Exception:
+        db.rollback()
+        logger.exception("Auto-post failed for invoice %s (%s)", invoice.id, invoice.invoice_no)
 
     return invoice
 
