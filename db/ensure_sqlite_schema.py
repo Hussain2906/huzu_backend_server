@@ -3,7 +3,6 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.db.base import Base
 from app.db.bootstrap_admins import ensure_platform_admin_users
 from app.db.session import engine
@@ -66,27 +65,8 @@ def ensure_sqlite_schema() -> None:
             conn.execute(text("ALTER TABLE quotation_lines ADD COLUMN line_order INTEGER DEFAULT 0"))
             conn.execute(text("UPDATE quotation_lines SET line_order = 0 WHERE line_order IS NULL"))
 
-        mobile_release_cols = _column_names(conn, "mobile_releases")
-        if "environment" not in mobile_release_cols:
-            conn.execute(text("ALTER TABLE mobile_releases ADD COLUMN environment VARCHAR(20)"))
-        conn.execute(
-            text(
-                "UPDATE mobile_releases "
-                "SET environment = :environment "
-                "WHERE environment IS NULL OR TRIM(environment) = ''"
-            ),
-            {"environment": settings.app_env},
-        )
-
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_customers_party_id ON customers(party_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_suppliers_party_id ON suppliers(party_id)"))
-        conn.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_mobile_releases_platform_environment_active "
-                "ON mobile_releases(platform, environment, is_active)"
-            )
-        )
 
     with Session(engine) as session:
         ensure_party_links_for_legacy_data(session)

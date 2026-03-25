@@ -2,6 +2,7 @@ import csv
 import io
 
 import pytest
+from openpyxl import Workbook
 
 from testing.tests.factories import create_company, create_user
 from testing.tests.helpers import auth_headers, login
@@ -39,6 +40,22 @@ def _csv_bytes(rows: list[dict[str, str]]) -> bytes:
     for row in rows:
         writer.writerow(row)
     return stream.getvalue().encode("utf-8")
+
+
+
+def _xlsx_bytes_with_title_row(rows: list[dict[str, str]]) -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["A1"] = "Party Details Report"
+    for index, header in enumerate(PARTY_HEADERS, start=1):
+        sheet.cell(row=3, column=index, value=header)
+    for row_index, row in enumerate(rows, start=4):
+        for col_index, header in enumerate(PARTY_HEADERS, start=1):
+            sheet.cell(row=row_index, column=col_index, value=row.get(header, ""))
+
+    stream = io.BytesIO()
+    workbook.save(stream)
+    return stream.getvalue()
 
 
 @pytest.mark.integration
@@ -219,3 +236,48 @@ def test_party_import_preview_marks_invalid_credit_as_error(client, db_session, 
     row = preview.json()["rows"][0]
     assert row["action"] == "ERROR"
     assert any(err["field"] == "CREDIT" for err in row["errors"])
+
+
+@pytest.mark.integration
+def test_party_import_preview_accepts_xlsx_with_title_rows(client, db_session, seed_roles):
+    company = create_company(db_session, name="Party Import Co")
+    create_user(db_session, username="owner", password="Pass@1234", company_id=company.id, role_code="SUPER_ADMIN")
+    access_token, _ = login(client, "owner", "Pass@1234")
+
+    xlsx_data = _xlsx_bytes_with_title_row(
+        [
+            {
+                "SR NO": "1",
+                "NAME": "Title Row Works",
+                "PHONE": "9000000010",
+                "CATEGORY": "DEBTORS",
+                "CREDIT": "₹ 120.0",
+                "TYPE": "CUSTOMER",
+                "GST NO": "",
+                "BILLING TYPE": "REGULAR",
+                "DOB": "",
+                "BUSINESS NAME": "",
+                "EMAIL": "",
+                "BILLING ADDRESS": "Sample Address",
+                "BILLING STATES & U.T.": "Maharashtra",
+                "BILLING POSTAL CODE": "411001",
+                "DELIVERY ADDRESS": "",
+                "DELIVERY STATES & U.T.": "",
+                "DELIVERY POSTAL CODE": "",
+                "PAYMENT TERM": "30 DAYS",
+                "SEND ALERTS": "YES",
+                "FAVOURITE PARTY": "NO",
+            }
+        ]
+    )
+
+    preview = client.post(
+        "/v1/imports/parties/preview",
+        files={"file": ("party.xlsx", xlsx_data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=auth_headers(access_token),
+    )
+    assert preview.status_code == 200
+    body = preview.json()
+    assert body["summary"]["create"] == 1
+    assert body["rows"][0]["action"] == "CREATE"
+    assert body["rows"][0]["row_number"] == 4

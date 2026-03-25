@@ -16,7 +16,6 @@ from app.api.routes.v1.accounting import router as accounting_router
 from app.api.routes.v1.payments import router as payments_router
 from app.api.routes.v1.reports import router as reports_router
 from app.api.routes.v1.money import router as money_router
-from app.api.routes.mobile_updates import router as mobile_updates_router
 
 api_router = APIRouter()
 api_router.include_router(health_router, tags=["health"])
@@ -36,4 +35,3 @@ api_router.include_router(accounting_router)
 api_router.include_router(payments_router)
 api_router.include_router(reports_router)
 api_router.include_router(money_router)
-api_router.include_router(mobile_updates_router)

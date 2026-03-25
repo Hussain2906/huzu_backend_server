@@ -3,9 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 import hashlib
+import io
 from typing import Any
 
 from fastapi import HTTPException, status
+from openpyxl import load_workbook
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -172,6 +174,51 @@ def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 
+def _parse_party_upload_rows(filename: str, content: bytes) -> tuple[list[tuple[int, dict[str, str]]], list[str]]:
+    rows, headers = parse_tabular_upload_content(filename, content)
+    numbered_rows = [(index + 2, row) for index, row in enumerate(rows)]
+
+    normalized_headers = {_normalize_header(header) for header in headers if header}
+    if REQUIRED_COLUMNS.issubset(normalized_headers):
+        return numbered_rows, headers
+
+    lowered = filename.lower()
+    if not (lowered.endswith(".xlsx") or lowered.endswith(".xlsm")):
+        return numbered_rows, headers
+
+    workbook = load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+    sheet = workbook.active
+    data = list(sheet.iter_rows(values_only=True))
+    if not data:
+        return numbered_rows, headers
+
+    header_index: int | None = None
+    for index, row in enumerate(data[:50]):
+        candidate_headers = [(_clean(cell).lower()) for cell in (row or ())]
+        candidate_normalized = {_normalize_header(header) for header in candidate_headers if header}
+        if REQUIRED_COLUMNS.issubset(candidate_normalized):
+            header_index = index
+            headers = candidate_headers
+            break
+
+    if header_index is None:
+        return numbered_rows, headers
+
+    adjusted_rows: list[tuple[int, dict[str, str]]] = []
+    for source_index, row in enumerate(data[header_index + 1 :], start=header_index + 2):
+        cleaned: dict[str, str] = {}
+        for col_index, header in enumerate(headers):
+            if not header:
+                continue
+            value = row[col_index] if row and col_index < len(row) else ""
+            cleaned[header] = _clean(value)
+        if any(value for value in cleaned.values()):
+            adjusted_rows.append((source_index, cleaned))
+
+    return adjusted_rows, headers
+
+
+
 def _find_match_candidates(db: Session, company_id: str, parsed: dict[str, Any]) -> tuple[list[Party], str | None, str | None]:
     gstin = parsed.get("gstin")
     if gstin:
@@ -307,8 +354,8 @@ def _validate_and_parse_row(row_number: int, raw_row: dict[str, Any]) -> tuple[d
 
 
 def preview_party_import(db: Session, user: User, *, filename: str, content: bytes) -> dict[str, Any]:
-    rows, headers = parse_tabular_upload_content(filename, content)
-    if not rows:
+    rows_with_numbers, headers = _parse_party_upload_rows(filename, content)
+    if not rows_with_numbers:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No data rows found in file")
 
     normalized_headers = {_normalize_header(h) for h in headers if h}
@@ -326,7 +373,7 @@ def preview_party_import(db: Session, user: User, *, filename: str, content: byt
         file_name=filename,
         file_hash=file_hash,
         status="PREVIEW_READY",
-        total_rows=len(rows),
+        total_rows=len(rows_with_numbers),
         created_by=user.id,
     )
     db.add(batch)
@@ -339,8 +386,7 @@ def preview_party_import(db: Session, user: User, *, filename: str, content: byt
     error_count = 0
     warning_count = 0
 
-    for idx, raw in enumerate(rows):
-        row_number = idx + 2
+    for row_number, raw in rows_with_numbers:
         parsed, warnings, errors = _validate_and_parse_row(row_number, raw)
 
         action = "ERROR"
@@ -412,7 +458,7 @@ def preview_party_import(db: Session, user: User, *, filename: str, content: byt
     batch.warning_count = warning_count
     batch.result_json = {
         "summary": {
-            "total_rows": len(rows),
+            "total_rows": len(rows_with_numbers),
             "create": create_count,
             "update": update_count,
             "possible_duplicate": duplicate_count,
